@@ -1,4 +1,9 @@
 dependencies:
     - jupyter
     - numpy
-  
+    - pandas
+    - configargparse
+    - requests
+    - conda-forge:spacy
+    - conda-forge:elasticsearch
+    - conda-forge:elasticsearch-dsl

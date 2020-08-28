@@ -1,3 +1,7 @@
+# In case need docker (for GPU support) instead of docker-compose: 
+# $ cd ~/.../entity_knowledge_in_bert
+# $ sudo docker build -t wikilink_app -f .devcontainer/Dockerfile .
+# $ sudo docker run -dit --gpus all -v ~/Documents:/workspace -p 8890:8888 --ipc=host wikilink_app
 version: '3'
 
 services:
@@ -20,39 +24,30 @@ services:
       
     # Overrides default command so things don't shut down after the process ends.
     # command: sleep infinity
-    command: bash -c "jupyter notebook --ip 0.0.0.0 --port 8888 --no-browser --allow-root && sleep infinity"
+    command: bash -c "jupyter notebook --ip=0.0.0.0 --port=8888 --no-browser --NotebookApp.token='' --NotebookApp.password='' --allow-root && sleep infinity"
     
-    # links: 
-    #   - db
-    
-  # db:
-  #   image: postgres
-  #   restart: unless-stopped
-  #   ports: 
-  #     - 5432:5432
-  #   environment:
-  #     POSTGRES_PASSWORD: LocalPassword
 
-  # es:
-  #   image: docker.elastic.co/elasticsearch/elasticsearch:7.6.2
-  #   # container_name: es01
-  #   environment:
-  #     - discovery.type=single-node
-  #     # - node.name=es01
-  #     # - cluster.name=es-docker-cluster
-  #     # - discovery.seed_hosts=es02,es03
-  #     # - cluster.initial_master_nodes=es01,es02,es03
-  #     - bootstrap.memory_lock=true
-  #     - "ES_JAVA_OPTS=-Xms512m -Xmx512m"
-  #   ulimits:
-  #     memlock:
-  #       soft: -1
-  #       hard: -1
-  #   volumes:
-  #     - ~/docker-volumes/esdata:/usr/share/elasticsearch/data
-  #   ports:
-  #     - 9201:9200
+  es:
+    image: docker.elastic.co/elasticsearch/elasticsearch:7.9.0
+    # container_name: es01
+    environment:
+      - discovery.type=single-node
+      # - node.name=es01
+      # - cluster.name=es-docker-cluster
+      # - discovery.seed_hosts=es02,es03
+      # - cluster.initial_master_nodes=es01,es02,es03
+      - bootstrap.memory_lock=true
+      - "ES_JAVA_OPTS=-Xms512m -Xmx512m"
+    ulimits:
+      memlock:
+        soft: -1
+        hard: -1
+    volumes:
+      - data01:/usr/share/elasticsearch/data
+    ports:
+      - 9202:9200
 
-# volumes:
-#   data01:
-#     device: /opt/your-project/data
+volumes:
+  data01:
+    driver: local
+

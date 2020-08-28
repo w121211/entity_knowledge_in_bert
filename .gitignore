@@ -158,5 +158,9 @@ venv.bak/
 # mypy
 .mypy_cache/
 
+downloads/
 data/
 .DS_Store
+
+cache.sqlite
+outputs

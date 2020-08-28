@@ -1,0 +1,7 @@
+git+https://github.com/vi3k6i5/flashtext.git
+wikidataintegrator
+yfinance
+requests-cache
+pytorch-pretrained-bert
+sparqlwrapper
+python-dotenv

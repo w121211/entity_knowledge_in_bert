@@ -22,6 +22,12 @@ RUN if [ -f "/tmp/conda-tmp/environment.yml" ]; then /opt/conda/bin/conda env up
 # Install pylint
 RUN /opt/conda/bin/pip install pylint
 
+# Install nodejs - https://github.com/nodesource/distributions/blob/master/README.md
+# & install elasticdump - https://github.com/taskrabbit/elasticsearch-dump
+RUN curl -sL https://deb.nodesource.com/setup_14.x | sudo -E bash -
+RUN apt-get install -y nodejs
+RUN npm install elasticdump -g
+
 # [Optional] Uncomment this section to install additional OS packages.
 # RUN apt-get update && export DEBIAN_FRONTEND=noninteractive \
 #     && apt-get -y install --no-install-recommends <your-package-list-here>
