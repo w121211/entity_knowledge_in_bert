@@ -1,6 +1,16 @@
 """
 Setup (once only)
 $ python es.py
+
+Docker network
+$ sudo docker network create twint-wikilink
+$ sudo docker network connect twint-wikilink <wikilink-app-container-id>
+$ sudo docker network connect twint-wikilink <twint-es-container-id>
+$ ping -c 2 twintdevcontainer_es_1 -p 9200
+
+Elasticsdump
+$ multielasticdump --direction=dump --match='^.*$' --fsCompress --input=http://es:9200 --output=esdump_2020****
+$ multielasticdump --direction=load --match='^.*$' --fsCompress --output=http://es:9200 --input=esdump_2020****
 """
 from __future__ import annotations
 import base64
@@ -84,7 +94,7 @@ def wikiextracted_to_elastic(wikiextracted_folder_path: str):
     print("Wikiextracted to elastic finished")
 
 
-def scan_scraper_page(url_filter: str, sorted: bool = True) -> Iterable[Document]:
+def scan_scraper_page(url_filter: str, sorted: bool = False) -> Iterable[Document]:
     es = connections.get_connection()
     s = Search(using=es, index="scraper-page")
     q = Q('wildcard', resolved_url=url_filter) & Q("term", http_status=200)
@@ -98,8 +108,8 @@ def scan_scraper_page(url_filter: str, sorted: bool = True) -> Iterable[Document
 
     visited = set()
     for i, hit in enumerate(s.scan()):
-        if i > 100:
-            break
+        # if i > 100:
+        #     break
         if hit.resolved_url in visited:
             continue
         visited.add(hit.resolved_url)
@@ -133,8 +143,11 @@ def migrate(src, dest):
     es.indices.refresh(index=dest)
 
 
-def connect():
-    connections.create_connection(hosts=['es:9200'])
+def connect(hosts: List[str]):
+    # c = connections.Connections()
+    # c.configure(default={"hosts": ["es.com"]}, local={"hosts": ["localhost"]})
+    # c.remove_connection("default")
+    connections.create_connection(hosts=hosts, timeout=20)
 
 
 def setup(move: bool = False):
@@ -145,7 +158,7 @@ def setup(move: bool = False):
 
 
 if __name__ == '__main__':
-    connect()
+    connect(['es:9200'])
     # seed()
     # setup(move=False)
     # migrate("news_rss", RSS_ALIAS)

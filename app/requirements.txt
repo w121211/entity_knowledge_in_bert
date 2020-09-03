@@ -5,3 +5,7 @@ requests-cache
 pytorch-pretrained-bert
 sparqlwrapper
 python-dotenv
+spacy
+elasticsearch-dsl
+networkx[lxml]
+qwikidata

@@ -16,11 +16,11 @@ services:
     build: 
       context: ..
       dockerfile: .devcontainer/Dockerfile
-
     volumes:
       - ../..:/workspace:cached
     ports:
       - 8890:8888
+    ipc: host
       
     # Overrides default command so things don't shut down after the process ends.
     # command: sleep infinity

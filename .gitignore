@@ -158,9 +158,13 @@ venv.bak/
 # mypy
 .mypy_cache/
 
-downloads/
-data/
 .DS_Store
 
 cache.sqlite
 outputs
+
+downloads/
+data/
+wikiextracted/
+outputs/
+esdump_*/
