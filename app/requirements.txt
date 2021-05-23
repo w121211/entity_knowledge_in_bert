@@ -1,11 +1,15 @@
+pandas
+configargparse
+requests
+requests-cache
 git+https://github.com/vi3k6i5/flashtext.git
 wikidataintegrator
 yfinance
-requests-cache
 pytorch-pretrained-bert
 sparqlwrapper
 python-dotenv
 spacy
-elasticsearch-dsl
+elasticsearch-dsl>=7.0.0,<8.0.0
 networkx[lxml]
 qwikidata
+mwparserfromhell

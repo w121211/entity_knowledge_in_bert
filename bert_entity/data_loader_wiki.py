@@ -24,8 +24,8 @@ class EDLDataset(data.Dataset):
             loc_file_name = args.test_loc_file
             self.data_dir = args.test_data_dir
 
-
         self.data_path = f"data/versions/{args.data_version_name}/wiki_training/integerized/{args.wiki_lang_version}/"
+        # self.data_path = f"../data/versions/{args.data_version_name}/wiki_training/integerized/{args.wiki_lang_version}/"
         self.item_locs = None
         self.device = device
         if os.path.exists("{}.pickle".format(self.data_path + loc_file_name)):
@@ -33,7 +33,8 @@ class EDLDataset(data.Dataset):
                 self.item_locs = pickle.load(f)
         else:
             with open(self.data_path + loc_file_name) as f:
-                self.item_locs = list(map(lambda x: list(map(int, x.strip().split())), tqdm(f.readlines())))
+                self.item_locs = list(
+                    map(lambda x: list(map(int, x.strip().split())), tqdm(f.readlines())))
             with open("{}.pickle".format(self.data_path + loc_file_name), "wb") as f:
                 pickle.dump(self.item_locs, f)
         self.pad_token_id = vocab.PAD_ID
@@ -100,9 +101,12 @@ def EDLDataset_collate_func(
                     mention_probs_chunk,
                 ) = pickle.load(f)
                 try:
-                    eval_mask = list(map(is_a_wikilink_or_keyword, mention_probs_chunk))
-                    mention_entity_ids_chunk = list(map(itemgetter(0), mention_entity_ids_chunk))
-                    mention_entity_probs_chunk = list(map(itemgetter(0), mention_entity_probs_chunk))
+                    eval_mask = list(
+                        map(is_a_wikilink_or_keyword, mention_probs_chunk))
+                    mention_entity_ids_chunk = list(
+                        map(itemgetter(0), mention_entity_ids_chunk))
+                    mention_entity_probs_chunk = list(
+                        map(itemgetter(0), mention_entity_probs_chunk))
                     batch_dict_list.append(
                         {
                             "token_ids": token_ids_chunk,
@@ -117,7 +121,7 @@ def EDLDataset_collate_func(
                     print(mention_entity_probs_chunk)
                     raise e
 
-        f = lambda x: [sample[x] for sample in batch_dict_list]
+        def f(x): return [sample[x] for sample in batch_dict_list]
         # print(batch)
         batch_token_ids = f("token_ids")
         batch_entity_ids = f("entity_ids")
@@ -125,7 +129,8 @@ def EDLDataset_collate_func(
         eval_mask = f("eval_mask")
         maxlen = max([len(chunk) for chunk in batch_token_ids])
 
-        eval_mask = torch.LongTensor([sample + [0] * (maxlen - len(sample)) for sample in eval_mask])
+        eval_mask = torch.LongTensor(
+            [sample + [0] * (maxlen - len(sample)) for sample in eval_mask])
 
         # create dictionary mapping the vocabulary entity id to a batch label id
         #
@@ -141,7 +146,8 @@ def EDLDataset_collate_func(
             zip(batch_entity_ids, batch_entity_probs)
         ):
             for tok_id, (token_entity_ids, token_entity_probs) in enumerate(
-                zip(batch_item_token_item_entity_ids, batch_item_token_entity_probs)
+                zip(batch_item_token_item_entity_ids,
+                    batch_item_token_entity_probs)
             ):
                 for eid in token_entity_ids:
                     if eid not in all_batch_entity_ids:
@@ -157,9 +163,11 @@ def EDLDataset_collate_func(
         )
 
     else:
-        (batch_token_ids, batch_entity_ids, batch_entity_probs, eval_mask, all_batch_entity_ids, maxlen,) = loaded_batch
+        (batch_token_ids, batch_entity_ids, batch_entity_probs,
+         eval_mask, all_batch_entity_ids, maxlen,) = loaded_batch
 
-    batch_token_ids = torch.LongTensor([sample + [0] * (maxlen - len(sample)) for sample in batch_token_ids])
+    batch_token_ids = torch.LongTensor(
+        [sample + [0] * (maxlen - len(sample)) for sample in batch_token_ids])
 
     if return_labels:
 
@@ -173,7 +181,8 @@ def EDLDataset_collate_func(
         if args.label_size is None:
 
             batch_shared_label_ids = list(all_batch_entity_ids.keys())
-            label_probs = torch.zeros(batch_token_ids.size(0), batch_token_ids.size(1), args.vocab_size)
+            label_probs = torch.zeros(batch_token_ids.size(
+                0), batch_token_ids.size(1), args.vocab_size)
 
         else:
 
@@ -191,17 +200,20 @@ def EDLDataset_collate_func(
                 batch_shared_label_ids += list(negative_examples)
 
             if len(batch_shared_label_ids) < args.label_size:
-                negative_samples = set(numpy.random.choice(vocab.OUTSIDE_ID, args.label_size, replace=False))
+                negative_samples = set(numpy.random.choice(
+                    vocab.OUTSIDE_ID, args.label_size, replace=False))
                 negative_samples.difference_update(batch_shared_label_ids)
                 batch_shared_label_ids += list(negative_samples)
 
             batch_shared_label_ids = batch_shared_label_ids[: args.label_size]
 
-            label_probs = torch.zeros(batch_token_ids.size(0), batch_token_ids.size(1), len(batch_shared_label_ids))
+            label_probs = torch.zeros(batch_token_ids.size(
+                0), batch_token_ids.size(1), len(batch_shared_label_ids))
 
         drop_probs = None
         if drop_entity_mentions_prob > 0 and is_training:
-            drop_probs = torch.rand((batch_token_ids.size(0), batch_token_ids.size(1)),) < drop_entity_mentions_prob
+            drop_probs = torch.rand((batch_token_ids.size(
+                0), batch_token_ids.size(1)),) < drop_entity_mentions_prob
 
         # loop through the batch x tokens x (label_ids, label_probs)
         for batch_offset, (batch_item_token_item_entity_ids, batch_item_token_entity_probs) in enumerate(
@@ -209,7 +221,8 @@ def EDLDataset_collate_func(
         ):
             # loop through tokens x (label_ids, label_probs)
             for tok_id, (token_entity_ids, token_entity_probs) in enumerate(
-                zip(batch_item_token_item_entity_ids, batch_item_token_entity_probs)
+                zip(batch_item_token_item_entity_ids,
+                    batch_item_token_entity_probs)
             ):
                 if drop_entity_mentions_prob > 0 and is_training and drop_probs[batch_offset][tok_id].item() == 1:
                     batch_token_ids[batch_offset][tok_id] = vocab.tokenizer.vocab["[MASK]"]
@@ -220,7 +233,8 @@ def EDLDataset_collate_func(
                     )
                 else:
                     label_probs[batch_offset][tok_id][
-                        torch.LongTensor(list(map(all_batch_entity_ids.__getitem__, token_entity_ids)))
+                        torch.LongTensor(
+                            list(map(all_batch_entity_ids.__getitem__, token_entity_ids)))
                     ] = torch.Tensor(token_entity_probs)
 
         label_ids = torch.LongTensor(batch_shared_label_ids)
@@ -243,6 +257,8 @@ def EDLDataset_collate_func(
 # hack to detect if an entity annotation was a
 # wikilink (== only one entity label) or a
 # keyword matcher annotation (== multiple entity labels)
+
+
 def is_a_wikilink_or_keyword(item):
     if len(item) == 1:
         return 1

@@ -1,6 +1,4 @@
 dependencies:
     - jupyter
     - numpy
-    - pandas
-    - configargparse
-    - requests
+    - conda-forge::graph-tool

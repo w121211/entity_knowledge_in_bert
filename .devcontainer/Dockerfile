@@ -2,7 +2,7 @@ FROM pytorch/pytorch:latest
 
 # Options for common setup script
 ARG INSTALL_ZSH="true"
-ARG UPGRADE_PACKAGES="false"
+ARG UPGRADE_PACKAGES="true"
 ARG USERNAME=vscode
 ARG USER_UID=1000
 ARG USER_GID=$USER_UID

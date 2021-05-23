@@ -27,11 +27,13 @@ class Net(nn.Module):
 
         self.top_rnns = args.top_rnns
         if args.top_rnns:
-            self.rnn = nn.LSTM(bidirectional=True, num_layers=2, input_size=768, hidden_size=768 // 2, batch_first=True)
+            self.rnn = nn.LSTM(bidirectional=True, num_layers=2,
+                               input_size=768, hidden_size=768 // 2, batch_first=True)
         self.fc = None
         if args.project:
             self.fc = nn.Linear(768, args.entity_embedding_size)
-        self.out = nn.Embedding(num_embeddings=vocab_size, embedding_dim=args.entity_embedding_size, sparse=args.sparse)
+        self.out = nn.Embedding(
+            num_embeddings=vocab_size, embedding_dim=args.entity_embedding_size, sparse=args.sparse)
         # torch.nn.init.normal_(self.out, std=0.1)
 
         self.device = args.device
@@ -40,6 +42,7 @@ class Net(nn.Module):
         self.vocab_size = vocab_size
 
     def to(self, device, out_device):
+        out_device = "cpu"
         self.bert.to(device)
         if self.fc:
             self.fc.to(device)
@@ -168,9 +171,11 @@ class Net(nn.Module):
 
                 if iter == 0:
                     logging.debug(f"Sanity check")
-                    logging.debug("x:", batch_token_ids.cpu().numpy()[0])
-                    logging.debug("tokens:", vocab.tokenizer.convert_ids_to_tokens(batch_token_ids.cpu().numpy()[0]))
-                    logging.debug("y:", label_probs.cpu().numpy()[0])
+                    logging.debug("x:", str(batch_token_ids.cpu().numpy()[0]))
+                    logging.debug("tokens:", vocab.tokenizer.convert_ids_to_tokens(
+                        batch_token_ids.cpu().numpy()[0]))
+                    logging.debug("y:", str(label_probs.cpu().numpy()[0]))
+                    # print(label_probs.cpu().numpy()[0])
 
                 loss_aggr = running_mean(loss.detach().item(), loss_aggr)
 
@@ -191,8 +196,10 @@ class Net(nn.Module):
                 t.set_postfix(
                     loss=loss_aggr,
                     nr_labels=len(label_ids),
-                    aggr_labels=len(labels_with_high_model_score) if labels_with_high_model_score else 0,
-                    last_eval=metrics.report(filter={"f1", "num_proposed", "epoch", "step"}),
+                    aggr_labels=len(
+                        labels_with_high_model_score) if labels_with_high_model_score else 0,
+                    last_eval=metrics.report(
+                        filter={"f1", "num_proposed", "epoch", "step"}),
                 )
                 t.update()
 
@@ -219,7 +226,8 @@ class Net(nn.Module):
     ):
 
         print()
-        logging.info(f"Start evaluation on split {'test' if args.eval_on_test_only else 'valid'}")
+        logging.info(
+            f"Start evaluation on split {'test' if args.eval_on_test_only else 'valid'}")
 
         model.eval()
         model.to(args.device, args.eval_device)
@@ -238,7 +246,8 @@ class Net(nn.Module):
                     _,
                 ) = batch
 
-                logits, y, y_hat, probs, _, _ = model(batch_token_ids, None, None)  # logits: (N, T, VOCAB), y: (N, T)
+                logits, y, y_hat, probs, _, _ = model(
+                    batch_token_ids, None, None)  # logits: (N, T, VOCAB), y: (N, T)
 
                 tags = list()
                 predtags = list()
@@ -250,7 +259,7 @@ class Net(nn.Module):
                 chunk_overlap = args.create_integerized_training_instance_text_overlap
 
                 for batch_id, seq in enumerate(label_probs.max(-1)[1]):
-                    for tok_id, label_id in enumerate(seq[chunk_overlap : -chunk_overlap]):
+                    for tok_id, label_id in enumerate(seq[chunk_overlap: -chunk_overlap]):
                         y_resolved = (
                             vocab.PAD_ID
                             if eval_mask[batch_id][tok_id + chunk_overlap] == 0
@@ -265,26 +274,32 @@ class Net(nn.Module):
                                 else label_ids[y_hat[batch_id][tok_id + chunk_overlap]].item()
                             )
                         else:
-                            y_hat_resolved = y_hat[batch_id][tok_id + chunk_overlap].item()
+                            y_hat_resolved = y_hat[batch_id][tok_id +
+                                                             chunk_overlap].item()
                         y_hat_resolved_list.append(y_hat_resolved)
                         predtags.append(vocab.idx2tag[y_hat_resolved])
-                        token_list.append(batch_token_ids[batch_id][tok_id + chunk_overlap].item())
+                        token_list.append(
+                            batch_token_ids[batch_id][tok_id + chunk_overlap].item())
 
                 all_y.append(y_resolved_list)
                 all_y_hat.append(y_hat_resolved_list)
                 all_tags.append(tags)
                 all_predicted.append(predtags)
-                all_words.append(vocab.tokenizer.convert_ids_to_tokens(token_list))
+                all_words.append(
+                    vocab.tokenizer.convert_ids_to_tokens(token_list))
                 all_token_ids.append(token_list)
 
-        ## calc metric
+        # calc metric
         y_true = numpy.array(list(chain(*all_y)))
         y_pred = numpy.array(list(chain(*all_y_hat)))
         all_token_ids = numpy.array(list(chain(*all_token_ids)))
 
-        num_proposed = len(y_pred[(vocab.OUTSIDE_ID > y_pred) & (all_token_ids > 0)])
-        num_correct = (((y_true == y_pred) & (vocab.OUTSIDE_ID > y_true) & (all_token_ids > 0))).astype(numpy.int).sum()
-        num_gold = len(y_true[(vocab.OUTSIDE_ID > y_true) & (all_token_ids > 0)])
+        num_proposed = len(
+            y_pred[(vocab.OUTSIDE_ID > y_pred) & (all_token_ids > 0)])
+        num_correct = (((y_true == y_pred) & (vocab.OUTSIDE_ID > y_true) & (
+            all_token_ids > 0))).astype(numpy.int).sum()
+        num_gold = len(
+            y_true[(vocab.OUTSIDE_ID > y_true) & (all_token_ids > 0)])
 
         new_metrics = Metrics(
             epoch=epoch, step=step, num_correct=num_correct, num_proposed=num_proposed, num_gold=num_gold,
@@ -324,9 +339,11 @@ class Net(nn.Module):
                     "step": step,
                     "performance": new_metrics.dict(),
                 }
-                fname = os.path.join(args.logdir, "{}-{}".format(str(epoch), str(step)))
+                fname = os.path.join(
+                    args.logdir, "{}-{}".format(str(epoch), str(step)))
                 torch.save(config, f"{fname}.pt")
-                fname = os.path.join(args.logdir, new_metrics.get_best_checkpoint_filename())
+                fname = os.path.join(
+                    args.logdir, new_metrics.get_best_checkpoint_filename())
                 torch.save(config, f"{fname}.pt")
                 logging.info(f"weights were saved to {fname}.pt")
 
@@ -346,24 +363,30 @@ class Net(nn.Module):
 
         if args.encoder_lr > 0:
             optimizer_encoder = optim.Adam(
-                list(self.bert.parameters()) + list(self.fc.parameters() if args.project else list()),
+                list(self.bert.parameters()) +
+                list(self.fc.parameters() if args.project else list()),
                 lr=args.encoder_lr,
             )
             if args.resume_from_checkpoint is not None:
-                optimizer_encoder.load_state_dict(checkpoint["optimizer_dense"])
+                optimizer_encoder.load_state_dict(
+                    checkpoint["optimizer_dense"])
                 optimizer_encoder.param_groups[0]["lr"] = args.encoder_lr
                 optimizer_encoder.param_groups[0]["weight_decay"] = args.encoder_weight_decay
             optimizers.append(optimizer_encoder)
         else:
-            optimizers.append(DummyOptimizer(self.out.parameters(), defaults={}))
+            optimizers.append(DummyOptimizer(
+                self.out.parameters(), defaults={}))
 
         if args.decoder_lr > 0:
             if args.sparse:
-                optimizer_decoder = optim.SparseAdam(self.out.parameters(), lr=args.decoder_lr)
+                optimizer_decoder = optim.SparseAdam(
+                    self.out.parameters(), lr=args.decoder_lr)
             else:
-                optimizer_decoder = optim.Adam(self.out.parameters(), lr=args.decoder_lr)
+                optimizer_decoder = optim.Adam(
+                    self.out.parameters(), lr=args.decoder_lr)
             if args.resume_from_checkpoint is not None:
-                optimizer_decoder.load_state_dict(checkpoint["optimizer_sparse"])
+                optimizer_decoder.load_state_dict(
+                    checkpoint["optimizer_sparse"])
                 if "weight_decay" not in optimizer_decoder.param_groups[0]:
                     optimizer_decoder.param_groups[0]["weight_decay"] = 0
                 optimizer_decoder.param_groups[0]["lr"] = args.decoder_lr
@@ -371,10 +394,12 @@ class Net(nn.Module):
                     optimizer_decoder.param_groups[0]["weight_decay"] = args.decoder_weight_decay
             optimizers.append(optimizer_decoder)
         else:
-            optimizers.append(DummyOptimizer(self.out.parameters(), defaults={}))
+            optimizers.append(DummyOptimizer(
+                self.out.parameters(), defaults={}))
 
         lr_schedulers = [
-            getattr(LRSchedulers, lr_scheduler)(optimizer=optimizer, **lr_scheduler_config)
+            getattr(LRSchedulers, lr_scheduler)(
+                optimizer=optimizer, **lr_scheduler_config)
             for optimizer, (lr_scheduler, lr_scheduler_config) in zip(
                 optimizers,
                 [
@@ -382,7 +407,8 @@ class Net(nn.Module):
                     (args.decoder_lr_scheduler, args.decoder_lr_scheduler_config),
                 ],
             )
-            if lr_scheduler is not None  # and not isinstance(optimizer, DummyOptimizer)
+            # and not isinstance(optimizer, DummyOptimizer)
+            if lr_scheduler is not None
         ]
 
         return tuple(optimizers), tuple(lr_schedulers)

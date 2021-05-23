@@ -10,22 +10,27 @@ import os
 import sys
 import datetime
 import dateutil
+import itertools
 import json
 import pathlib
 import time
 from collections import defaultdict
 from typing import Any, Callable, Dict, Iterable, List, Tuple, Optional, Set, Union
 
-import elasticsearch
 import pandas as pd
 import networkx as nx
 import requests
 import requests_cache
 import spacy
 import yfinance as yf
+import elasticsearch
 from dotenv import load_dotenv
-from elasticsearch_dsl import connections, Document, Date, Keyword, Q, Search, Text, Range, Integer
 from flashtext import KeywordProcessor
+from qwikidata.entity import WikidataItem
+from qwikidata.json_dump import WikidataJsonDump
+from qwikidata.utils import dump_entities_to_json
+
+import graph_tool.all as gt
 
 from . import es
 
@@ -164,76 +169,102 @@ def download_ticker_info_from_iexcloud(tickers: Iterable[str], token: str) -> Di
     return ticker_info
 
 
-def get_wkmentions_graph(seedtitles: Iterable[str], depth: int) -> nx.DiGraph:
+def get_wktitles_graph(seedtitles: Iterable[str], n_depth: int) -> nx.DiGraph:
     """
     Return:
-        DiDiGraph: (node, {mentions: json_str, depth: int})
+        DiGraph: (node, {mentions: json_str, depth: int})
     Usage:
         G.nodes["nodename"]["mentions"]
         G.nodes["nodename"]["depth"]
         G.out_degree("nodename")
     """
-    def query(title: str):
-        s = es.WikiPage.search()
-        s = s.query("match", title=title)
-        for hit in s.execute()[:1]:
-            if hit.meta.score > 10:
-                return hit
-        return None
-
-    def get_mentions(title: str) -> Tuple[bool, List[Tuple[str, str]]]:
-        unfounded = False
-        mentions = []
-        try:
-            page = es.WikiPage.get(id=title)
-        except elasticsearch.NotFoundError:
-            page = query(title)
-            if page is None:
-                unfounded = True
-        else:
-            mentions = json.loads(page.mentions)
-        return unfounded, mentions
-
     G = nx.DiGraph()
     seeds = seedtitles
-    for i in range(depth):
+    for i in range(n_depth):
         print(f"Depth {i}: {len(seeds)} nodes")
         for seed in seeds:
-            unfounded, mentions = get_mentions(seed)
+            print(seed)
+            doc = es.get_wikipage(seed)
+            print(doc)
+            if doc is None:
+                unfounded = True
+                mentions = []
+            else:
+                unfounded = False
+                mentions = json.loads(doc.mentions)
+
             if seed in G:
                 G.nodes[seed]['depth'] = i
                 G.nodes[seed]['unfounded'] = unfounded
             else:
                 G.add_node(seed, depth=i, unfounded=unfounded, mentions=set())
 
-            for _, _, mention, wktitle in mentions:
+            for wktitle, mention in mentions:
                 G.add_edge(seed, wktitle)
                 try:
                     G.nodes[wktitle]['mentions'].add(mention)
                 except KeyError:
                     G.nodes[wktitle]['mentions'] = {mention}
         seeds = [n for n in G if not 'depth' in G.nodes[n]]
+        print(seeds)
+
+    # 最後的seeds需要手動加入properties
+    for seed in seeds:
+        unfounded = False
+        if seed in G:
+            G.nodes[seed]['depth'] = n_depth
+            G.nodes[seed]['unfounded'] = unfounded
+        else:
+            G.add_node(seed, depth=n_depth,
+                       unfounded=unfounded, mentions=set())
     return G
 
-# def
 
+def get_matched_wkd_entities(wktitles: List[str]) -> Dict[str, WikidataItem]:
+    def is_matched(q: WikidataItem) -> bool:
+        # 確認是否有中文名
+        if q.get_label("zh") == "":
+            print(f'Skip, no zh label: {q.get_enwiki_title()}')
+            return False
 
-def get_matched_wkdatas_from_dump(wktitles: List[str]):
-    print("掃整個wikidata-dump，將沒有中文名")
+        # entity不能是人
+        cg = q.get_claim_group("P31")  # P31:instance_of
+        instanceof = [c.mainsnak.datavalue.value['id'] for c in cg]
+        if "Q5" in instanceof:  # Q5:human
+            print(f'Skip, is a person: {q.get_enwiki_title()}')
+            return False
 
-    def is_matched(e):
-        if e.get_label("cn"):
-            pass
-        if e.get_claims("loc"):
-            pass
+        # entity不能有位置claim
+        cg = q.get_claim_group("P625")  # P625:coordinate_location
+        if cg.property_id is not None:
+            print(f'Skip, has coordinate location: {q.get_enwiki_title()}')
+            return False
+        return True
 
-    matched = set()
-    for e in wikidata:
-        if not e in wktitles:
-            continue
-        if is_matched(e):
-            matched.add(e)
+    matched = dict()
+    for wktitle in wktitles:
+        try:
+            doc = es.WikiData.get(id=wktitle)
+            q = WikidataItem(json.loads(doc.json))
+            if is_matched(q):
+                matched[wktitle] = q
+        except elasticsearch.NotFoundError:
+            print(f"Not found wikidata: {wktitle}")
+
     return matched
+
+
+def calc_pagerank(g: gt.Graph) -> List[Tuple[int, str, float]]:
+    """
+    Return: sorted list of tuples, [(vertex_idx, wk_title, pagerank_value), ....]
+    """
+    vp_label = g.vp['_graphml_vertex_id']  # same as wktitle
+    pr = gt.pagerank(g)
+    ranks = [(g.vertex_index[v], vp_label[v], pr[v]) for v in g.vertices()]
+    ranks = sorted(ranks, key=lambda e: -e[-1])
+    return ranks
+
+### Corpus Processors ###
 
 
 def expand_word(word: str):
@@ -321,23 +352,46 @@ def count_corpus_mentions_freqs(mentions: Dict[str, List[str]]) -> Dict[str, Dic
 def main():
     # params
     IEXCLOUD_TOKEN = os.getenv("IEXCLOUD_TOKEN")
-    mentions_depth = 1
 
+    # 需要事前提供的檔案
+
+    # 在執行時會自動產生的檔案
     output_folder = './outputs'
     downlaods_folder = './downloads'
-    sp500_csv = f"{downlaods_folder}/s_and_p_500.csv"
     entities_json = f"{output_folder}/wd_entities.json"
     tk_csv = './downloads/bats_symbols_traded_byx.csv'
     tk_info_json = "./downloads/iex_ticker_info.json"
     urls_json = f"{output_folder}/wiki_urls.json"
     mentions_json = f"{output_folder}/wiki_mentions.json"
     sent_cooccurs_json = f"{output_folder}/corpus_mentions_sent_cooccurs.json"
-    ark_cooccurs_json = f"{output_folder}/corpus_mentions_atk_cooccurs.json"
+    atk_cooccurs_json = f"{output_folder}/corpus_mentions_atk_cooccurs.json"
     atk_bags_json = f"{output_folder}/corpus_mentions_atk_bags.json"
     freqs_json = f"{output_folder}/corpus_mentions_freqs.json"
-    wkmentions_graphml = f"{output_folder}/wk_mentions.graphml.bz2"
+
+    # Wiki processor requires:
+    explore_n_wk_depth: int = 2  # 探索wk的層數
+    adpot_n_wk_depth: int = 1    # 在n層以內的wk-titles會被實際採用（其他用作graph計算）
+    wkd_dump_json = "./downloads/latest-all.json.bz2"
+    seeded_wk_titles = []
+    sp500_csv = f"{downlaods_folder}/s_and_p_500.csv"
+
+    # Wiki processor outputs:
+    wk_titles_graphml = f"{output_folder}/wk_titles.graphml.bz2"
+    wk_pagerank_json = f"{output_folder}/wk_pagerank.json"
+    wk_cat_tags_json = f"{output_folder}/wk_cat_tags.json"
+    # wk_tags_json = f"{output_folder}/wk_tags.json"
+    wk_tags_pagerank_csv = f"{output_folder}/wk_tags_pagerank.csv"
+
+    wkd_filtered_entities_json = f"{output_folder}/wkd_filtered_entities.json"
+    wk_ranked_titles_json = f"{output_folder}/wk_ranked_titles.json"
+    wkd_entites_by_ranked_titles_json = f"{output_folder}/wkd_entites_by_ranked_titles.json"
 
     pathlib.Path(output_folder).mkdir(exist_ok=True)
+
+    # print(get_matched_wkd_entities(titles, wkd_dump_path=wkd_dump_json))
+    # entities = load_or_run(wkd_entites_by_ranked_titles_json,
+    #                     lambda: get_matched_wkd_entities(titles, wkd_dump_path=wkd_dump_json),
+    #                     forcerun=True)
 
     # print("從wikidata取得具有symbol屬性的entities")
     # results = load_or_run(
@@ -365,35 +419,152 @@ def main():
     # urls = load_or_run(
     #     urls_json, lambda: search_wikipage(names))
 
-    print(f"連線elasticsearch（用於存放wiki-page, news-corpus）")
-    es.connect(["es:9200"])
-
     #  掃wikipedia-dump，從company的wiki-page開始抓裡面的mentions
     #  將新加入的mentions設為next_entities，重複抓取n次（=爬n層）
     # print(f"取得跟公司關聯的mentions - {depth}階層")
     # titles = [v.split('/')[-1].replace("_", " ")
     #           for _, v in urls.items() if v is not None]
 
-    # TODO: 擴展同義詞（用於flashtext）
-    print(f"以S&P500為起點爬'{mentions_depth}階層'的wiki-mentions，建立graph")
-    df = pd.read_csv(sp500_csv)
-    titles = list(df['Name'])
-    # G = nx.read_graphml(wkmentions_graphml)
-    try:
-        G = nx.read_graphml(wkmentions_graphml)
-        for n in G:
-            G.nodes[n]['mentions'] = json.loads(
-                G.nodes[n]['mentions'])
-    except FileNotFoundError:
-        G = get_wkmentions_graph(titles, depth=mentions_depth)
-        for n in G:
-            G.nodes[n]['mentions'] = json.dumps(
-                G.nodes[n]['mentions'], ensure_ascii=False, default=serialize_sets)
-        nx.write_graphml_lxml(G, wkmentions_graphml)
+    print(f"# 連線elasticsearch（用於存放wiki-page, news-corpus）")
+    es.connect(["es:9200"])
 
-    # print("找出Graph中重要的nodes: Pagerank")
-    # pr = nx.pagerank(G)
-    # print(G.nodes)
+    print(f"# 以S&P500 wikipage為起點，爬'{explore_n_wk_depth}階層'的titles，建立graph")
+    # seedtitles = ["List of S&P 500 companies"]
+    seedtitles = ["Wilson (company)"]
+    try:
+        # raise FileNotFoundError
+        g = gt.load_graph(wk_titles_graphml)
+        print(f"File loaded: {wk_titles_graphml}")
+    except FileNotFoundError:
+        print(f"File not found, create new one")
+        g = get_wktitles_graph(seedtitles, n_depth=explore_n_wk_depth)
+        for n in g:
+            g.nodes[n]['mentions'] = json.dumps(
+                g.nodes[n]['mentions'], ensure_ascii=False, default=serialize_sets)
+        nx.write_graphml_lxml(g, wk_titles_graphml)
+        g = gt.load_graph(wk_titles_graphml)
+
+    print("# 使用完整的graph跑pagerank（為避免記憶體不足，改用graph-tool庫）")
+    ranks = load_or_run(
+        wk_pagerank_json, lambda: calc_pagerank(g), forcerun=True)
+
+    print(f"# 挑出graph中的wiki-category，再找主要描述此category的wiki-title")
+
+    def _cat_tags() -> Iterable[str]:
+        _, wk_title, _ = zip(*ranks)
+        cats = filter(lambda e: "Category:" in e, wk_title)
+        # print(list(cats))
+        # print([c for c in cats])
+        tags = [es.get_corresponded_wktitles(cat_title=c) for c in cats]
+        tags = set(itertools.chain(*tags))
+        # tags &= set(tags)
+        return tags
+
+    cat_tags = load_or_run(
+        wk_cat_tags_json, lambda: _cat_tags(), forcerun=True)
+
+    print(f"# 依照wk-title找尋對應的wkd-entity")
+
+    # tags = ["Technology", "Internet", "Metal"]
+    cattag_entity = get_matched_wkd_entities(cat_tags)
+    ranks_by_tags = []
+    for _, wk_title, pagerank in ranks:
+        try:
+            e = cattag_entity[wk_title]
+            ranks_by_tags.append(
+                (e.entity_id, e.get_enwiki_title(), e.get_label("zh"), pagerank))
+        except KeyError:
+            pass
+
+    print("# 將ranks存成csv格式")
+    wkd_id, wk_title, zh_label, pagerank = zip(*ranks_by_tags)
+    tags = wk_title
+    df = pd.DataFrame(
+        {'wkd_id': wkd_id,
+         'wk_title': wk_title,
+         'zh_label': zh_label,
+         'pagerank': pagerank})
+    df.to_csv(wk_tags_pagerank_csv, index=False)
+
+    return
+
+    print("# 找一個ticker的tags")
+
+    def get_neighbors(v: gt.Vertex, n_expands: int = 2):
+        seeds = set([v])
+        traveled = set()
+        for i in range(n_expands):
+            nextseeds = set()
+            for v in seeds:
+                nextseeds |= set(v.out_neighbors())
+            nextseeds -= seeds
+            traveled |= seeds
+            seeds = nextseeds
+        return traveled
+
+    # tags = set(["joint venture"])
+    tickers = ["Wilson (company)"]
+    tags_by_tickers = []
+    for tk in tickers:
+        v = gt.find_vertex(g, g.vp['_graphml_vertex_id'], tk)[0]
+        neighbors = get_neighbors(v, n_expands=2)
+        neighbors = set([g.vp['_graphml_vertex_id'][v] for v in neighbors])
+        tags_by_tickers.append((tk, tags & neighbors))
+    print(tags_by_tickers)
+
+    return
+
+    print(f"tag的排序、重要度、重複性（用max_flow、n_path之類的方式）")
+    # for tk in tickers:
+    #     neighbors = get_neighbors(tk)
+
+    print(f"TODO:巡所有的news，計算mentions的詞頻")
+
+    # print(f"巡所有的news，計算mentions的詞頻")
+
+    # TODO: 擴展同義詞（用於flashtext）
+    # print(f"載入S&P500，做為seed-wk-titles")
+    # df = pd.read_csv(sp500_csv)
+    # seedtitles = list(df['Name'])
+
+    # print(f"以seed-wk-titles為起點，爬'{explore_n_wk_depth}階層'的wk-titles，建立graph")
+    # try:
+    #     # raise FileNotFoundError
+    #     g = gt.load_graph(wk_titles_graphml)
+    #     print(f"File loaded: {wk_titles_graphml}")
+    # except FileNotFoundError:
+    #     print(f"File not found, create new one")
+    #     g = get_wktitles_graph(seedtitles, n_depth=explore_n_wk_depth)
+    #     for n in g:
+    #         g.nodes[n]['mentions'] = json.dumps(
+    #             g.nodes[n]['mentions'], ensure_ascii=False, default=serialize_sets)
+    #     nx.write_graphml_lxml(g, wk_titles_graphml)
+    #     g = gt.load_graph(wk_titles_graphml)
+
+    # print(f"僅採用{adpot_n_wk_depth}-depth的wk-titles")
+    # vp_label = g.vp['_graphml_vertex_id']
+    # vp_depth = g.vp['depth']
+    # wktitles = [vp_label[v]
+    #             for v in g.vertices() if vp_depth[v] <= adpot_n_wk_depth]
+
+    # print("掃wkd-dump，將沒有中文名、有位置claim（很可能是地點）、是人的wk-titles排除")
+    # try:
+    #     raise FileNotFoundError
+    #     entities = WikidataJsonDump(wkd_filtered_entities_json)
+    #     filtered_wktitles = set([e.get_enwiki_title() for e in entities])
+    #     print(f"File loaded: {wkd_filtered_entities_json}")
+    # except FileNotFoundError:
+    #     print(f"File not found, create new one")
+    #     entities = get_matched_wkd_entities(
+    #         wktitles, wkd_dump_path=wkd_dump_json)
+    #     dump_entities_to_json(entities, wkd_filtered_entities_json)
+    #     filtered_wktitles = set([e.get_enwiki_title() for e in entities])
+
+    # print("使用完整的graph跑pagerank（為避免記憶體不足，改用graph-tool庫）")
+    # load_or_run(wk_filtered_pagerank_json,
+    #             lambda: calc_pagerank(g, included_wktitles=filtered_wktitles), forcerun=True)
+
+    return
 
     # es.connect(["twintdevcontainer_es_1:9200"])
 

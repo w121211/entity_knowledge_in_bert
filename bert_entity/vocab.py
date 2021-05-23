@@ -17,13 +17,16 @@ class Vocab:
     def load(self, args, popular_entity_to_id_dict=None):
 
         if popular_entity_to_id_dict is None:
+            # with open(f"../data/versions/{args.data_version_name}/indexes/popular_entity_to_id_dict.pickle", "rb") as f:
             with open(f"data/versions/{args.data_version_name}/indexes/popular_entity_to_id_dict.pickle", "rb") as f:
                 popular_entity_to_id_dict = pickle.load(f)
 
         if args.uncased:
-            tokenizer = BertTokenizer.from_pretrained("bert-base-uncased", do_lower_case=True)
+            tokenizer = BertTokenizer.from_pretrained(
+                "bert-base-uncased", do_lower_case=True)
         else:
-            tokenizer = BertTokenizer.from_pretrained("bert-base-cased", do_lower_case=False)
+            tokenizer = BertTokenizer.from_pretrained(
+                "bert-base-cased", do_lower_case=False)
 
         self.tag2idx = popular_entity_to_id_dict
 

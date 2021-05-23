@@ -76,6 +76,7 @@ if [ "${PACKAGES_ALREADY_INSTALLED}" != "true" ]; then
         libstdc++6 \
         zlib1g \
         locales \
+        tmux \
         sudo"
 
     # Install libssl1.1 if available
